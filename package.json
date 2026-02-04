@@ -1,0 +1,32 @@
+{
+  "name": "focusmate-mcp",
+  "version": "1.0.0",
+  "description": "MCP server for FocusMate session management",
+  "type": "module",
+  "main": "build/index.js",
+  "bin": {
+    "focusmate-mcp": "./build/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node build/index.js",
+    "dev": "tsx src/index.ts",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "lint": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "playwright": "^1.50.0",
+    "zod": "^3.25.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.7.0",
+    "vitest": "^2.0.0"
+  },
+  "engines": {
+    "node": ">=20"
+  }
+}
