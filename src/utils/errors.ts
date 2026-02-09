@@ -29,13 +29,6 @@ export class SessionConflictError extends FocusmateError {
   }
 }
 
-export class InvalidTimeError extends FocusmateError {
-  constructor(message = 'Invalid time. FocusMate sessions start on the hour or half hour.') {
-    super(message, 'INVALID_TIME');
-    this.name = 'InvalidTimeError';
-  }
-}
-
 export class SessionNotFoundError extends FocusmateError {
   constructor(sessionId: string) {
     super(`Session ${sessionId} not found.`, 'SESSION_NOT_FOUND');

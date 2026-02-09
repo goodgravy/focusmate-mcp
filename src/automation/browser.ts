@@ -1,7 +1,7 @@
-import { chromium, Browser, BrowserContext, Page } from 'playwright';
+import { chromium, BrowserContext, Page } from 'playwright';
 import * as path from 'path';
 import * as fs from 'fs';
-import { getConfigDir } from './cookies.js';
+import { getConfigDir } from './config.js';
 import { AuthExpiredError, AutomationFailedError } from '../utils/errors.js';
 
 const FOCUSMATE_BASE_URL = 'https://www.focusmate.com';
@@ -49,40 +49,6 @@ export async function launchPersistentContext(options: BrowserOptions = {}): Pro
   return context;
 }
 
-// Legacy functions for backwards compatibility
-let browserInstance: Browser | null = null;
-
-export async function launchBrowser(options: BrowserOptions = {}): Promise<Browser> {
-  const { headless = true, slowMo = 0 } = options;
-
-  if (browserInstance && browserInstance.isConnected()) {
-    return browserInstance;
-  }
-
-  browserInstance = await chromium.launch({
-    headless,
-    slowMo
-  });
-
-  return browserInstance;
-}
-
-export async function closeBrowser(): Promise<void> {
-  if (browserInstance) {
-    await browserInstance.close();
-    browserInstance = null;
-  }
-}
-
-export async function createAuthenticatedContext(browser: Browser): Promise<BrowserContext> {
-  // This is now deprecated - use launchPersistentContext instead
-  throw new AuthExpiredError('Please run focusmate_auth first to set up authentication.');
-}
-
-export async function createFreshContext(browser: Browser): Promise<BrowserContext> {
-  return browser.newContext();
-}
-
 export async function isLoggedIn(page: Page): Promise<boolean> {
   const url = page.url();
 
@@ -102,7 +68,7 @@ export async function isLoggedIn(page: Page): Promise<boolean> {
   }
 }
 
-export async function checkAuthAndNavigate(page: Page, targetUrl: string): Promise<void> {
+async function checkAuthAndNavigate(page: Page, targetUrl: string): Promise<void> {
   await page.goto(targetUrl, { waitUntil: 'domcontentloaded' });
 
   // Give the page time to redirect if auth is invalid
@@ -120,7 +86,7 @@ export async function navigateToDashboard(page: Page): Promise<void> {
   await checkAuthAndNavigate(page, DASHBOARD_URL);
 }
 
-export function getScreenshotDir(): string {
+function getScreenshotDir(): string {
   const screenshotDir = path.join(getConfigDir(), 'screenshots');
   if (!fs.existsSync(screenshotDir)) {
     fs.mkdirSync(screenshotDir, { recursive: true });
@@ -128,7 +94,7 @@ export function getScreenshotDir(): string {
   return screenshotDir;
 }
 
-export async function captureScreenshotOnError(
+async function captureScreenshotOnError(
   page: Page,
   operationName: string
 ): Promise<string> {

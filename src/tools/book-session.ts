@@ -15,7 +15,6 @@ import {
 import {
   SlotUnavailableError,
   SessionConflictError,
-  InvalidTimeError,
   AuthExpiredError
 } from '../utils/errors.js';
 
@@ -133,7 +132,6 @@ export function registerBookSessionTool(server: McpServer): void {
           error: error instanceof Error ? error.message : 'Unknown error occurred',
           errorCode: error instanceof SlotUnavailableError ? 'SLOT_UNAVAILABLE'
             : error instanceof SessionConflictError ? 'SESSION_CONFLICT'
-            : error instanceof InvalidTimeError ? 'INVALID_TIME'
             : error instanceof AuthExpiredError ? 'AUTH_EXPIRED'
             : 'AUTOMATION_FAILED'
         };

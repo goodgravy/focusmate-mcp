@@ -1,4 +1,4 @@
-import { getApiKey } from '../automation/cookies.js';
+import { getApiKey } from '../automation/config.js';
 import { ApiError, ConfigError } from '../utils/errors.js';
 import type { Session, SessionStatus } from '../schemas/session.js';
 
