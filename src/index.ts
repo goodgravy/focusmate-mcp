@@ -10,7 +10,7 @@ async function main(): Promise<void> {
   await server.connect(transport);
 
   // Log to stderr so it doesn't interfere with MCP communication
-  console.error('FocusMate MCP server running on stdio');
+  console.error('Focusmate MCP server running on stdio');
 }
 
 main().catch((error) => {

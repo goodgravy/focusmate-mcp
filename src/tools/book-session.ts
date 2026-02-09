@@ -21,7 +21,7 @@ import {
 export function registerBookSessionTool(server: McpServer): void {
   server.tool(
     'book_session',
-    'Book a FocusMate accountability session for a specific date, time, and duration.',
+    'Book a Focusmate accountability session for a specific date, time, and duration.',
     {
       startTime: BookSessionInput.shape.startTime,
       duration: BookSessionInput.shape.duration
@@ -46,7 +46,7 @@ export function registerBookSessionTool(server: McpServer): void {
       if (minutes % 15 !== 0) {
         const output: BookSessionOutput = {
           success: false,
-          error: `Invalid time. FocusMate sessions start every 15 minutes. Please choose a time like ${targetDate.getHours()}:00, ${targetDate.getHours()}:15, ${targetDate.getHours()}:30, or ${targetDate.getHours()}:45.`,
+          error: `Invalid time. Focusmate sessions start every 15 minutes. Please choose a time like ${targetDate.getHours()}:00, ${targetDate.getHours()}:15, ${targetDate.getHours()}:30, or ${targetDate.getHours()}:45.`,
           errorCode: 'INVALID_TIME'
         };
         return {

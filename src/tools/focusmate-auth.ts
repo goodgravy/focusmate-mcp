@@ -14,7 +14,7 @@ const AUTH_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes to complete login
 export function registerFocusmateAuthTool(server: McpServer): void {
   server.tool(
     'focusmate_auth',
-    'Open a browser window to log into FocusMate. Cookies will be saved for future use.',
+    'Open a browser window to log into Focusmate. Cookies will be saved for future use.',
     {
       force: z.boolean()
         .default(false)

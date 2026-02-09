@@ -9,7 +9,7 @@ import { ConfigError, ApiError } from '../utils/errors.js';
 export function registerListSessionsTool(server: McpServer): void {
   server.tool(
     'list_sessions',
-    'List FocusMate sessions within a date range. Requires API key to be configured.',
+    'List Focusmate sessions within a date range. Requires API key to be configured.',
     {
       startDate: ListSessionsInput.shape.startDate,
       endDate: ListSessionsInput.shape.endDate

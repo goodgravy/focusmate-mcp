@@ -9,7 +9,7 @@ export class DashboardPage {
 
   constructor(page: Page) {
     this.page = page;
-    // These selectors may need refinement based on actual FocusMate UI
+    // These selectors may need refinement based on actual Focusmate UI
     this.bookButton = page.getByRole('button', { name: /book/i });
     this.scheduleButton = page.getByRole('button', { name: /schedule/i });
     this.upcomingSessions = page.locator('[data-testid="upcoming-sessions"]')

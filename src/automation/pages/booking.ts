@@ -66,7 +66,7 @@ export class BookingPage {
   }
 
   async selectTimeSlot(targetDate: Date): Promise<void> {
-    // FocusMate uses a grid calendar with time rows and day columns
+    // Focusmate uses a grid calendar with time rows and day columns
     // Clickable slots show partner avatars or are empty cells
 
     const hours = targetDate.getHours();

@@ -13,7 +13,7 @@ import { SessionNotFoundError, AuthExpiredError } from '../utils/errors.js';
 export function registerCancelSessionTool(server: McpServer): void {
   server.tool(
     'cancel_session',
-    'Cancel an existing FocusMate session by its ID.',
+    'Cancel an existing Focusmate session by its ID.',
     {
       sessionId: CancelSessionInput.shape.sessionId
     },

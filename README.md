@@ -1,10 +1,10 @@
-# FocusMate MCP Server
+# Focusmate MCP Server
 
-An MCP (Model Context Protocol) server that enables Claude to book, cancel, and query FocusMate accountability sessions.
+An MCP (Model Context Protocol) server that enables Claude to book, cancel, and query Focusmate accountability sessions.
 
 ## Features
 
-- **Book sessions** - Schedule FocusMate sessions for specific dates and times
+- **Book sessions** - Schedule Focusmate sessions for specific dates and times
 - **Cancel sessions** - Cancel existing sessions by ID
 - **List sessions** - Query upcoming and past sessions within a date range
 - **Interactive authentication** - Secure browser-based login with cookie persistence
@@ -47,9 +47,9 @@ Replace `/path/to/focusmate-mcp` with the actual path to your installation.
 
 ### API Key (for list_sessions)
 
-To use the `list_sessions` tool, you need a FocusMate API key:
+To use the `list_sessions` tool, you need a Focusmate API key:
 
-1. Go to [FocusMate Settings](https://www.focusmate.com/profile/edit-p)
+1. Go to [Focusmate Settings](https://www.focusmate.com/profile/edit-p)
 2. Scroll to the API section and generate an API key
 3. Create the config file:
 
@@ -63,31 +63,31 @@ chmod 600 ~/.focusmate-mcp/config.json
 
 ### Initial Authentication
 
-Before booking or canceling sessions, authenticate with FocusMate:
+Before booking or canceling sessions, authenticate with Focusmate:
 
 ```
 Use the focusmate_auth tool to log in
 ```
 
-This opens a browser window where you can log in to FocusMate. Once logged in, your session is saved automatically.
+This opens a browser window where you can log in to Focusmate. Once logged in, your session is saved automatically.
 
 ### Available Tools
 
 #### `focusmate_auth`
 
-Open a browser window to log into FocusMate. Cookies are saved for future use.
+Open a browser window to log into Focusmate. Cookies are saved for future use.
 
 **Parameters:**
 - `force` (boolean, optional): Force re-authentication even if valid cookies exist
 
 **Example:**
 ```
-Authenticate with FocusMate
+Authenticate with Focusmate
 ```
 
 #### `book_session`
 
-Book a FocusMate accountability session.
+Book a Focusmate accountability session.
 
 **Parameters:**
 - `startTime` (string, required): ISO 8601 datetime for session start
@@ -95,26 +95,26 @@ Book a FocusMate accountability session.
 
 **Example:**
 ```
-Book a 50-minute FocusMate session for tomorrow at 2pm
+Book a 50-minute Focusmate session for tomorrow at 2pm
 ```
 
 Note: Sessions must start on 15-minute boundaries (e.g., 14:00, 14:15, 14:30, 14:45).
 
 #### `cancel_session`
 
-Cancel an existing FocusMate session.
+Cancel an existing Focusmate session.
 
 **Parameters:**
 - `sessionId` (string, required): The ID of the session to cancel
 
 **Example:**
 ```
-Cancel my FocusMate session with ID abc123
+Cancel my Focusmate session with ID abc123
 ```
 
 #### `list_sessions`
 
-List FocusMate sessions within a date range.
+List Focusmate sessions within a date range.
 
 **Parameters:**
 - `startDate` (string, required): Start of date range (ISO 8601)
@@ -122,7 +122,7 @@ List FocusMate sessions within a date range.
 
 **Example:**
 ```
-Show my FocusMate sessions for this week
+Show my Focusmate sessions for this week
 ```
 
 ## Error Codes
@@ -160,7 +160,7 @@ npm run lint
 
 ### "Authentication expired" errors
 
-Run `focusmate_auth` to log in again. FocusMate sessions typically expire after several hours of inactivity.
+Run `focusmate_auth` to log in again. Focusmate sessions typically expire after several hours of inactivity.
 
 ### Booking fails with no clear error
 
@@ -168,7 +168,7 @@ Check for screenshots in `~/.focusmate-mcp/screenshots/`. The automation capture
 
 ### "API key not configured" for list_sessions
 
-The `list_sessions` tool uses FocusMate's official API, which requires an API key. Book and cancel operations use browser automation and only need cookies from `focusmate_auth`.
+The `list_sessions` tool uses Focusmate's official API, which requires an API key. Book and cancel operations use browser automation and only need cookies from `focusmate_auth`.
 
 ### Browser doesn't open for authentication
 
@@ -179,9 +179,9 @@ npx playwright install chromium
 
 ## Limitations
 
-- **Read-only API**: FocusMate's official API only supports reading data. Booking and cancellation use browser automation, which may break if FocusMate changes their UI.
+- **Read-only API**: Focusmate's official API only supports reading data. Booking and cancellation use browser automation, which may break if Focusmate changes their UI.
 - **Rate limiting**: The API has a limit of 100 requests per minute. Browser automation is naturally slower and shouldn't hit limits.
-- **Session duration**: Only 25, 50, and 75-minute sessions are supported (FocusMate's standard options).
+- **Session duration**: Only 25, 50, and 75-minute sessions are supported (Focusmate's standard options).
 
 ## License
 

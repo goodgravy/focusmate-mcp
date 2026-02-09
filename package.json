@@ -1,7 +1,7 @@
 {
   "name": "focusmate-mcp",
   "version": "1.0.0",
-  "description": "MCP server for FocusMate session management",
+  "description": "MCP server for Focusmate session management",
   "type": "module",
   "main": "build/index.js",
   "bin": {

@@ -38,7 +38,7 @@ export class FocusmateClient {
     const key = apiKey || getApiKey();
     if (!key) {
       throw new ConfigError(
-        'FocusMate API key not configured. ' +
+        'Focusmate API key not configured. ' +
         'Please generate an API key at https://www.focusmate.com/profile/edit-p ' +
         'and store it in ~/.focusmate-mcp/config.json as {"apiKey": "your-key"}'
       );
@@ -64,7 +64,7 @@ export class FocusmateClient {
 
     if (!response.ok) {
       if (response.status === 401) {
-        throw new ApiError('Invalid API key. Please check your FocusMate API key.', 401);
+        throw new ApiError('Invalid API key. Please check your Focusmate API key.', 401);
       }
       if (response.status === 429) {
         throw new ApiError('Rate limit exceeded. Please wait before making more requests.', 429);
