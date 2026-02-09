@@ -39,18 +39,14 @@ export class BookingPage {
       .or(page.locator('.calendar'))
       .or(page.locator('[role="grid"]'));
 
-    // Confirm/Book button
-    this.confirmBookingButton = page.getByRole('button', { name: /book.*session/i })
-      .or(page.getByRole('button', { name: /schedule/i }))
-      .or(page.locator('button:has-text("Book")'));
+    // Confirm/Book button - specifically the "Book N session(s)" button at the bottom
+    this.confirmBookingButton = page.getByRole('button', { name: /book \d+ session/i });
 
     // Cancel button
     this.cancelButton = page.getByRole('button', { name: /cancel/i });
 
-    // Confirmation message
-    this.confirmationMessage = page.getByText(/session.*booked/i)
-      .or(page.getByText(/successfully.*scheduled/i))
-      .or(page.getByRole('alert'));
+    // Confirmation message - look for the specific toast text
+    this.confirmationMessage = page.getByText(/\d+ session[s]? booked/i).first();
   }
 
   async selectDuration(duration: SessionDuration): Promise<void> {
@@ -70,36 +66,78 @@ export class BookingPage {
   }
 
   async selectTimeSlot(targetDate: Date): Promise<void> {
-    // Format the time to find the right slot
+    // FocusMate uses a grid calendar with time rows and day columns
+    // Clickable slots show partner avatars or are empty cells
+
     const hours = targetDate.getHours();
     const minutes = targetDate.getMinutes();
+    const dayOfMonth = targetDate.getDate();
 
-    // FocusMate slots are every 15 minutes
-    // Round to nearest 15-minute slot
-    const roundedMinutes = Math.round(minutes / 15) * 15;
-    const slotMinutes = roundedMinutes === 60 ? 0 : roundedMinutes;
-    const slotHours = roundedMinutes === 60 ? hours + 1 : hours;
-
-    // Format as HH:MM for searching
-    const timeStr = `${slotHours.toString().padStart(2, '0')}:${slotMinutes.toString().padStart(2, '0')}`;
-
-    // Also format in 12-hour for alternative search
-    const hour12 = slotHours > 12 ? slotHours - 12 : (slotHours === 0 ? 12 : slotHours);
-    const ampm = slotHours >= 12 ? 'PM' : 'AM';
-    const time12Str = `${hour12}:${slotMinutes.toString().padStart(2, '0')} ${ampm}`;
-
-    // Try to find and click the time slot
-    // Strategy 1: Look for button with exact time
-    const timeSlotButton = this.page.getByRole('button', { name: new RegExp(timeStr) })
-      .or(this.page.getByRole('button', { name: new RegExp(time12Str, 'i') }))
-      .or(this.page.locator(`[data-time="${timeStr}"]`))
-      .or(this.page.locator(`button:has-text("${timeStr}")`));
-
-    // First, we may need to navigate to the correct date
+    // First, ensure we're looking at the right date column
     await this.navigateToDate(targetDate);
 
-    // Then click the time slot
-    await timeSlotButton.first().click();
+    // Format time labels to search for
+    const hour12 = hours > 12 ? hours - 12 : (hours === 0 ? 12 : hours);
+    const ampm = hours >= 12 ? 'pm' : 'am';
+    const hourLabel = `${hour12}${ampm}`; // e.g., "9am"
+    const timeStr24 = `${hours.toString().padStart(2, '0')}:${minutes.toString().padStart(2, '0')}`;
+
+    // Scroll to the target time using Home key to go to top, then scroll down
+    await this.page.keyboard.press('Home');
+    await this.page.waitForTimeout(300);
+
+    // Try to scroll the page to bring the target hour into view
+    // Use page-level scrolling since we can't easily identify the scroll container
+    await this.page.evaluate((targetHour) => {
+      // Find time labels and scroll to the right one
+      const timeLabels = document.querySelectorAll('*');
+      for (const el of timeLabels) {
+        if (el.textContent?.trim() === targetHour) {
+          el.scrollIntoView({ behavior: 'instant', block: 'center' });
+          return;
+        }
+      }
+    }, hourLabel);
+
+    await this.page.waitForTimeout(500);
+
+    // Find the time label element
+    const timeLabel = this.page.locator(`text="${hourLabel}"`).first();
+
+    // Wait for it to be visible
+    try {
+      await timeLabel.waitFor({ timeout: 5000 });
+    } catch {
+      throw new Error(`Could not find time slot for ${hourLabel}`);
+    }
+
+    // Get the bounding box of the time label
+    const labelBox = await timeLabel.boundingBox();
+    if (!labelBox) {
+      throw new Error(`Could not get position of time label ${hourLabel}`);
+    }
+
+    // Find column headers to determine column positions
+    const dayHeaders = ['Wed', 'Thu', 'Fri', 'Sat', 'Sun', 'Mon', 'Tue'];
+    const targetDayName = targetDate.toLocaleDateString('en-US', { weekday: 'short' });
+
+    // Find the header for our target day
+    const headerLocator = this.page.locator(`text="${targetDayName} ${dayOfMonth}"`).first();
+    const headerBox = await headerLocator.boundingBox();
+
+    if (!headerBox) {
+      throw new Error(`Could not find column header for ${targetDayName} ${dayOfMonth}`);
+    }
+
+    // Calculate click position: center of the column, at the row of our time
+    // Add offset for minutes (each 15-min slot is roughly 15 pixels)
+    const minuteOffset = (minutes / 60) * 60; // Approximate pixels per hour = 60
+    const clickX = headerBox.x + headerBox.width / 2;
+    const clickY = labelBox.y + minuteOffset + 10; // Small offset to click within the cell
+
+    // Click the calculated position
+    await this.page.mouse.click(clickX, clickY);
+    await this.page.waitForTimeout(500);
   }
 
   private async navigateToDate(targetDate: Date): Promise<void> {
@@ -115,28 +153,25 @@ export class BookingPage {
       throw new Error('Cannot book sessions in the past');
     }
 
-    if (daysDiff > 0) {
-      // Click the appropriate date on the calendar
-      // Format for finding the date
-      const dayOfMonth = targetDate.getDate();
-      const monthName = targetDate.toLocaleDateString('en-US', { month: 'long' });
+    // The calendar typically shows 3 days at a time
+    // Check if the target date is visible, if not navigate
+    const dayOfMonth = targetDate.getDate();
+    const dayHeader = this.page.locator(`text=/.*${dayOfMonth}.*/`).first();
 
-      // Try to click the date
-      const dateButton = this.page.getByRole('button', { name: new RegExp(`${dayOfMonth}`) })
-        .filter({ hasText: new RegExp(dayOfMonth.toString()) })
-        .or(this.page.locator(`[data-date="${targetDate.toISOString().split('T')[0]}"]`));
+    // If day is not visible, use navigation arrows
+    try {
+      await dayHeader.waitFor({ timeout: 2000 });
+    } catch {
+      // Navigate forward if needed
+      const nextButton = this.page.getByRole('button', { name: /next|>/i })
+        .or(this.page.locator('[aria-label*="next"], [aria-label*="Next"], button:has(svg)').last());
 
-      // If the date is in a different month, we may need to navigate months first
-      // This is a simplified approach - may need enhancement
-      try {
-        await dateButton.first().click({ timeout: 2000 });
-      } catch {
-        // Try navigating to next month/week if needed
-        const nextButton = this.page.getByRole('button', { name: /next/i })
-          .or(this.page.locator('[aria-label="Next"]'));
+      // Click next until we see the target date
+      for (let i = 0; i < 10; i++) {
         await nextButton.click();
-        await this.page.waitForTimeout(500);
-        await dateButton.first().click();
+        await this.page.waitForTimeout(300);
+        const visible = await this.page.locator(`text=/.*${dayOfMonth}.*/`).first().isVisible();
+        if (visible) break;
       }
     }
   }

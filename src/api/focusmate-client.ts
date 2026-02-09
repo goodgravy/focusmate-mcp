@@ -57,7 +57,7 @@ export class FocusmateClient {
     const response = await fetch(url.toString(), {
       method: 'GET',
       headers: {
-        'Authorization': `Bearer ${this.apiKey}`,
+        'X-API-Key': this.apiKey,
         'Content-Type': 'application/json'
       }
     });

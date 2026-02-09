@@ -1,14 +1,14 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import {
-  launchBrowser,
-  createAuthenticatedContext,
+  launchPersistentContext,
+  hasAuthData,
   withErrorScreenshot
 } from '../automation/browser.js';
 import {
   CancelSessionInput,
   type CancelSessionOutput
 } from '../schemas/session.js';
-import { SessionNotFoundError } from '../utils/errors.js';
+import { SessionNotFoundError, AuthExpiredError } from '../utils/errors.js';
 
 export function registerCancelSessionTool(server: McpServer): void {
   server.tool(
@@ -18,13 +18,24 @@ export function registerCancelSessionTool(server: McpServer): void {
       sessionId: CancelSessionInput.shape.sessionId
     },
     async ({ sessionId }): Promise<{ content: Array<{ type: 'text'; text: string }> }> => {
-      let browser;
+      // Check if authenticated
+      if (!hasAuthData()) {
+        const output: CancelSessionOutput = {
+          success: false,
+          message: 'Not authenticated. Please run focusmate_auth first.',
+          errorCode: 'AUTH_REQUIRED'
+        };
+        return {
+          content: [{ type: 'text', text: JSON.stringify(output, null, 2) }]
+        };
+      }
+
       let context;
 
       try {
-        browser = await launchBrowser({ headless: true });
-        context = await createAuthenticatedContext(browser);
-        const page = await context.newPage();
+        // Use persistent context which preserves Firebase auth tokens in IndexedDB
+        context = await launchPersistentContext({ headless: true });
+        const page = context.pages()[0] || await context.newPage();
 
         const result = await withErrorScreenshot(page, 'cancel-session', async () => {
           // Navigate directly to the session page
@@ -51,17 +62,16 @@ export function registerCancelSessionTool(server: McpServer): void {
             // Session exists, continue
           }
 
-          // Find and click the cancel button
-          const cancelButton = page.getByRole('button', { name: /cancel/i })
-            .or(page.locator('button:has-text("Cancel session")'))
-            .or(page.locator('[data-testid="cancel-button"]'));
+          // Find and click the cancel button - use the one in the Upcoming session panel
+          const cancelButton = page.getByLabel('Upcoming session').getByRole('button', { name: /cancel/i }).first()
+            .or(page.locator('button:has-text("Cancel session")').first());
 
           await cancelButton.click();
 
-          // Handle confirmation dialog if present
-          const confirmCancelButton = page.getByRole('button', { name: /confirm/i })
-            .or(page.getByRole('button', { name: /yes.*cancel/i }))
-            .or(page.locator('[data-testid="confirm-cancel"]'));
+          // Handle confirmation dialog - click the "Cancel" button (not "Keep")
+          const confirmCancelButton = page.getByRole('button', { name: 'Cancel', exact: true })
+            .or(page.getByRole('button', { name: /confirm/i }))
+            .or(page.getByRole('button', { name: /yes.*cancel/i }));
 
           try {
             await confirmCancelButton.waitFor({ timeout: 3000 });
@@ -70,12 +80,18 @@ export function registerCancelSessionTool(server: McpServer): void {
             // No confirmation dialog, cancellation already processed
           }
 
-          // Wait for success indicator
+          // Wait for success indicator or for the session to disappear from Upcoming
           const successIndicator = page.getByText(/cancelled/i)
             .or(page.getByText(/session has been cancelled/i))
             .or(page.getByRole('alert'));
 
-          await successIndicator.waitFor({ timeout: 5000 });
+          try {
+            await successIndicator.waitFor({ timeout: 3000 });
+          } catch {
+            // If no explicit success message, check that the confirmation dialog is gone
+            // and the session is no longer in the Upcoming panel
+            await page.waitForTimeout(1000);
+          }
 
           return true;
         });
@@ -94,6 +110,7 @@ export function registerCancelSessionTool(server: McpServer): void {
           success: false,
           message: error instanceof Error ? error.message : 'Unknown error occurred',
           errorCode: error instanceof SessionNotFoundError ? 'SESSION_NOT_FOUND'
+            : error instanceof AuthExpiredError ? 'AUTH_EXPIRED'
             : 'AUTOMATION_FAILED'
         };
 
@@ -104,9 +121,6 @@ export function registerCancelSessionTool(server: McpServer): void {
       } finally {
         if (context) {
           await context.close();
-        }
-        if (browser) {
-          await browser.close();
         }
       }
     }

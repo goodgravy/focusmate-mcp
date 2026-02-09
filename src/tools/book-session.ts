@@ -1,7 +1,7 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import {
-  launchBrowser,
-  createAuthenticatedContext,
+  launchPersistentContext,
+  hasAuthData,
   navigateToDashboard,
   withErrorScreenshot
 } from '../automation/browser.js';
@@ -15,7 +15,8 @@ import {
 import {
   SlotUnavailableError,
   SessionConflictError,
-  InvalidTimeError
+  InvalidTimeError,
+  AuthExpiredError
 } from '../utils/errors.js';
 
 export function registerBookSessionTool(server: McpServer): void {
@@ -54,13 +55,24 @@ export function registerBookSessionTool(server: McpServer): void {
         };
       }
 
-      let browser;
+      // Check if authenticated
+      if (!hasAuthData()) {
+        const output: BookSessionOutput = {
+          success: false,
+          error: 'Not authenticated. Please run focusmate_auth first.',
+          errorCode: 'AUTH_REQUIRED'
+        };
+        return {
+          content: [{ type: 'text', text: JSON.stringify(output, null, 2) }]
+        };
+      }
+
       let context;
 
       try {
-        browser = await launchBrowser({ headless: true });
-        context = await createAuthenticatedContext(browser);
-        const page = await context.newPage();
+        // Use persistent context which preserves Firebase auth tokens in IndexedDB
+        context = await launchPersistentContext({ headless: true });
+        const page = context.pages()[0] || await context.newPage();
 
         // Navigate to dashboard
         await navigateToDashboard(page);
@@ -122,6 +134,7 @@ export function registerBookSessionTool(server: McpServer): void {
           errorCode: error instanceof SlotUnavailableError ? 'SLOT_UNAVAILABLE'
             : error instanceof SessionConflictError ? 'SESSION_CONFLICT'
             : error instanceof InvalidTimeError ? 'INVALID_TIME'
+            : error instanceof AuthExpiredError ? 'AUTH_EXPIRED'
             : 'AUTOMATION_FAILED'
         };
 
@@ -132,9 +145,6 @@ export function registerBookSessionTool(server: McpServer): void {
       } finally {
         if (context) {
           await context.close();
-        }
-        if (browser) {
-          await browser.close();
         }
       }
     }

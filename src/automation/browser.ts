@@ -1,19 +1,56 @@
 import { chromium, Browser, BrowserContext, Page } from 'playwright';
 import * as path from 'path';
 import * as fs from 'fs';
-import { loadStorageState, hasCookies, getConfigDir } from './cookies.js';
+import { getConfigDir } from './cookies.js';
 import { AuthExpiredError, AutomationFailedError } from '../utils/errors.js';
 
 const FOCUSMATE_BASE_URL = 'https://www.focusmate.com';
+const FOCUSMATE_APP_URL = 'https://app.focusmate.com';
 const LOGIN_URL = `${FOCUSMATE_BASE_URL}/login`;
-const DASHBOARD_URL = `${FOCUSMATE_BASE_URL}/dashboard`;
+const DASHBOARD_URL = `${FOCUSMATE_APP_URL}/dashboard`;
 
-let browserInstance: Browser | null = null;
+// Persistent browser state using user data directory
+// This preserves IndexedDB, localStorage, cookies - everything Firebase needs
+const USER_DATA_DIR = path.join(getConfigDir(), 'browser-data');
 
 export interface BrowserOptions {
   headless?: boolean;
   slowMo?: number;
 }
+
+function ensureUserDataDir(): void {
+  if (!fs.existsSync(USER_DATA_DIR)) {
+    fs.mkdirSync(USER_DATA_DIR, { recursive: true, mode: 0o700 });
+  }
+}
+
+export function hasAuthData(): boolean {
+  // Check if user data directory has been used (contains Default folder from Chromium)
+  const defaultDir = path.join(USER_DATA_DIR, 'Default');
+  return fs.existsSync(defaultDir);
+}
+
+export function clearAuthData(): void {
+  if (fs.existsSync(USER_DATA_DIR)) {
+    fs.rmSync(USER_DATA_DIR, { recursive: true, force: true });
+  }
+}
+
+export async function launchPersistentContext(options: BrowserOptions = {}): Promise<BrowserContext> {
+  const { headless = true, slowMo = 0 } = options;
+  ensureUserDataDir();
+
+  // Launch with persistent context - this preserves ALL browser state including IndexedDB
+  const context = await chromium.launchPersistentContext(USER_DATA_DIR, {
+    headless,
+    slowMo
+  });
+
+  return context;
+}
+
+// Legacy functions for backwards compatibility
+let browserInstance: Browser | null = null;
 
 export async function launchBrowser(options: BrowserOptions = {}): Promise<Browser> {
   const { headless = true, slowMo = 0 } = options;
@@ -38,17 +75,8 @@ export async function closeBrowser(): Promise<void> {
 }
 
 export async function createAuthenticatedContext(browser: Browser): Promise<BrowserContext> {
-  const storagePath = loadStorageState();
-
-  if (!storagePath) {
-    throw new AuthExpiredError('No stored credentials found. Please run focusmate_auth first.');
-  }
-
-  const context = await browser.newContext({
-    storageState: storagePath
-  });
-
-  return context;
+  // This is now deprecated - use launchPersistentContext instead
+  throw new AuthExpiredError('Please run focusmate_auth first to set up authentication.');
 }
 
 export async function createFreshContext(browser: Browser): Promise<BrowserContext> {

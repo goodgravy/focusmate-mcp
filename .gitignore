@@ -31,3 +31,4 @@ npm-debug.log*
 playwright/.auth/
 test-results/
 playwright-report/
+.claude/

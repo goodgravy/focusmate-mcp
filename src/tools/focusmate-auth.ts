@@ -1,14 +1,12 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { z } from 'zod';
 import {
-  launchBrowser,
-  closeBrowser,
-  createFreshContext,
+  launchPersistentContext,
+  hasAuthData,
+  clearAuthData,
   isLoggedIn,
-  LOGIN_URL,
-  DASHBOARD_URL
+  LOGIN_URL
 } from '../automation/browser.js';
-import { saveCookies, hasCookies, deleteCookies } from '../automation/cookies.js';
 import type { AuthOutput } from '../schemas/session.js';
 
 const AUTH_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes to complete login
@@ -24,7 +22,7 @@ export function registerFocusmateAuthTool(server: McpServer): void {
     },
     async ({ force }): Promise<{ content: Array<{ type: 'text'; text: string }> }> => {
       // Check if already authenticated
-      if (!force && hasCookies()) {
+      if (!force && hasAuthData()) {
         const output: AuthOutput = {
           success: true,
           message: 'Already authenticated. Use force=true to re-authenticate.'
@@ -34,19 +32,18 @@ export function registerFocusmateAuthTool(server: McpServer): void {
         };
       }
 
-      // Clear existing cookies if forcing
+      // Clear existing auth data if forcing
       if (force) {
-        deleteCookies();
+        clearAuthData();
       }
 
-      let browser;
       let context;
 
       try {
-        // Launch headed browser for interactive login
-        browser = await launchBrowser({ headless: false, slowMo: 100 });
-        context = await createFreshContext(browser);
-        const page = await context.newPage();
+        // Launch headed browser with persistent context for interactive login
+        // This preserves IndexedDB where Firebase stores auth tokens
+        context = await launchPersistentContext({ headless: false, slowMo: 100 });
+        const page = context.pages()[0] || await context.newPage();
 
         // Navigate to login page
         await page.goto(LOGIN_URL);
@@ -64,9 +61,7 @@ export function registerFocusmateAuthTool(server: McpServer): void {
           if (currentUrl.includes('/dashboard') || currentUrl.includes('/home')) {
             // Verify we're actually logged in
             if (await isLoggedIn(page)) {
-              // Save cookies
-              await saveCookies(context);
-
+              // Auth data is automatically persisted in user data directory
               const output: AuthOutput = {
                 success: true,
                 message: 'Successfully authenticated and saved credentials.'
@@ -91,12 +86,9 @@ export function registerFocusmateAuthTool(server: McpServer): void {
         };
 
       } finally {
-        // Clean up
+        // Close context - data is persisted in user data directory
         if (context) {
           await context.close();
-        }
-        if (browser) {
-          await browser.close();
         }
       }
     }
