@@ -42,17 +42,3 @@ export class AutomationFailedError extends FocusmateError {
     this.name = 'AutomationFailedError';
   }
 }
-
-export class ApiError extends FocusmateError {
-  constructor(message: string, public statusCode: number) {
-    super(message, 'API_ERROR');
-    this.name = 'ApiError';
-  }
-}
-
-export class ConfigError extends FocusmateError {
-  constructor(message: string) {
-    super(message, 'CONFIG_ERROR');
-    this.name = 'ConfigError';
-  }
-}
