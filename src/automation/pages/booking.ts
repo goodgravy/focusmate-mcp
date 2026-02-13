@@ -20,18 +20,10 @@ export class BookingPage {
   constructor(page: Page) {
     this.page = page;
 
-    // Duration buttons - try multiple selector strategies
-    this.duration25Button = page.getByRole('button', { name: /25/i })
-      .or(page.locator('button:has-text("25")'))
-      .or(page.locator('[data-duration="25"]'));
-
-    this.duration50Button = page.getByRole('button', { name: /50/i })
-      .or(page.locator('button:has-text("50")'))
-      .or(page.locator('[data-duration="50"]'));
-
-    this.duration75Button = page.getByRole('button', { name: /75/i })
-      .or(page.locator('button:has-text("75")'))
-      .or(page.locator('[data-duration="75"]'));
+    // Duration buttons - match exact label text "25 min", "50 min", "75 min"
+    this.duration25Button = page.getByRole('button', { name: '25 min', exact: true });
+    this.duration50Button = page.getByRole('button', { name: '50 min', exact: true });
+    this.duration75Button = page.getByRole('button', { name: '75 min', exact: true });
 
     // Calendar - try common patterns
     this.calendar = page.getByRole('grid', { name: /calendar/i })
@@ -39,14 +31,14 @@ export class BookingPage {
       .or(page.locator('.calendar'))
       .or(page.locator('[role="grid"]'));
 
-    // Confirm/Book button - specifically the "Book N session(s)" button at the bottom
-    this.confirmBookingButton = page.getByRole('button', { name: /book \d+ session/i });
+    // The "Book" button that appears in-slot after clicking an empty calendar cell
+    this.confirmBookingButton = page.getByRole('button', { name: 'Book', exact: true });
 
-    // Cancel button
-    this.cancelButton = page.getByRole('button', { name: /cancel/i });
+    // "Clear" button that appears alongside "Book" in the slot selection
+    this.cancelButton = page.getByRole('button', { name: 'Clear', exact: true });
 
-    // Confirmation message - look for the specific toast text
-    this.confirmationMessage = page.getByText(/\d+ session[s]? booked/i).first();
+    // After booking confirms, the session card shows the time (e.g. "4:30pm")
+    this.confirmationMessage = page.locator('text=/\\d+:\\d{2}(am|pm)/i').first();
   }
 
   async selectDuration(duration: SessionDuration): Promise<void> {
@@ -117,8 +109,20 @@ export class BookingPage {
       throw new Error(`Could not get position of time label ${hourLabel}`);
     }
 
+    // Find the next hour label to measure actual pixels-per-hour
+    const nextHour12 = hour12 === 12 ? 1 : hour12 + 1;
+    const nextAmpm = (hours + 1) >= 12 && (hours + 1) < 24 ? 'pm' : 'am';
+    const nextHourLabel = `${nextHour12}${nextAmpm}`;
+    const nextTimeLabel = this.page.locator(`text="${nextHourLabel}"`).first();
+
+    const nextLabelBox = await nextTimeLabel.boundingBox();
+    if (!nextLabelBox) {
+      throw new Error(`Could not get position of next time label ${nextHourLabel}`);
+    }
+
+    const pixelsPerHour = nextLabelBox.y - labelBox.y;
+
     // Find column headers to determine column positions
-    const dayHeaders = ['Wed', 'Thu', 'Fri', 'Sat', 'Sun', 'Mon', 'Tue'];
     const targetDayName = targetDate.toLocaleDateString('en-US', { weekday: 'short' });
 
     // Find the header for our target day
@@ -130,8 +134,7 @@ export class BookingPage {
     }
 
     // Calculate click position: center of the column, at the row of our time
-    // Add offset for minutes (each 15-min slot is roughly 15 pixels)
-    const minuteOffset = (minutes / 60) * 60; // Approximate pixels per hour = 60
+    const minuteOffset = (minutes / 60) * pixelsPerHour;
     const clickX = headerBox.x + headerBox.width / 2;
     const clickY = labelBox.y + minuteOffset + 10; // Small offset to click within the cell
 
@@ -177,10 +180,12 @@ export class BookingPage {
   }
 
   async confirmBooking(): Promise<void> {
+    // Wait for the in-slot "Book" button to appear after clicking the time slot
+    await this.confirmBookingButton.waitFor({ timeout: 5000 });
     await this.confirmBookingButton.click();
 
-    // Wait for confirmation
-    await this.confirmationMessage.waitFor({ timeout: 10000 });
+    // Wait for the "Book" button to disappear (replaced by spinner, then session card)
+    await this.confirmBookingButton.waitFor({ state: 'hidden', timeout: 30000 });
   }
 
   async getConfirmationDetails(): Promise<{sessionId?: string}> {

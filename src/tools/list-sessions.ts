@@ -12,6 +12,23 @@ import {
 } from '../schemas/session.js';
 import { AuthExpiredError } from '../utils/errors.js';
 
+/** Parse a 12-hour time string like "3:30pm" into a Date using `baseDate` for the date portion. */
+function parseTime(timeStr: string, baseDate: Date): Date {
+  const match = timeStr.match(/^(\d{1,2}):(\d{2})(am|pm)$/i);
+  if (!match) throw new Error(`Cannot parse time: ${timeStr}`);
+
+  let hours = parseInt(match[1]);
+  const minutes = parseInt(match[2]);
+  const isPm = match[3].toLowerCase() === 'pm';
+
+  if (isPm && hours !== 12) hours += 12;
+  if (!isPm && hours === 12) hours = 0;
+
+  const date = new Date(baseDate);
+  date.setHours(hours, minutes, 0, 0);
+  return date;
+}
+
 export function registerListSessionsTool(server: McpServer): void {
   server.tool(
     'list_sessions',
@@ -51,59 +68,50 @@ export function registerListSessionsTool(server: McpServer): void {
         await navigateToDashboard(page);
 
         const sessions = await withErrorScreenshot(page, 'list-sessions', async () => {
-          // Wait for the Upcoming section to load
+          // Wait for the dashboard to load
           await page.waitForTimeout(2000);
 
-          // Find all session entries in the Upcoming panel
-          // The panel shows sessions grouped by date with session cards
-          const sessionCards = page.locator('[class*="upcoming"] [class*="session"]')
-            .or(page.getByLabel('Upcoming session'))
-            .or(page.locator('text=/\\d+:\\d+[ap]m\\s*-\\s*\\d+:\\d+[ap]m/i').locator('..').locator('..'));
+          // Session cards in the Upcoming panel have aria-label="Upcoming session"
+          const sessionCards = page.getByLabel('Upcoming session');
+          const count = await sessionCards.count();
 
           const sessions: Session[] = [];
-          const count = await sessionCards.count();
 
           for (let i = 0; i < count; i++) {
             const card = sessionCards.nth(i);
-            const cardText = await card.textContent() || '';
+            const cardText = await card.innerText() || '';
 
-            // Try to extract session details from the card
-            // Format: "9:00am - 9:50am" "50" "Partner Name" "Join"
+            // innerText gives newline-separated lines like:
+            //   "5:30pm - 6:20pm\n50\n≋\nTrung V.\nJoin\n..."
             const timeMatch = cardText.match(/(\d{1,2}:\d{2}[ap]m)\s*-\s*(\d{1,2}:\d{2}[ap]m)/i);
+            if (!timeMatch) continue;
+
             const durationMatch = cardText.match(/\b(25|50|75)\b/);
+            const duration = durationMatch ? parseInt(durationMatch[1]) : 50;
 
-            if (timeMatch) {
-              // Parse the date from context (look for date headers like "Tomorrow, February 5")
-              // For now, assume sessions are upcoming
-              const startTimeStr = timeMatch[1];
-              const endTimeStr = timeMatch[2];
-              const duration = durationMatch ? parseInt(durationMatch[1]) : 50;
+            // Partner name: find lines that aren't times, durations, or button labels
+            const lines = cardText.split('\n').map(l => l.trim()).filter(Boolean);
+            const skipPatterns = /^(\d{1,2}:\d{2}[ap]m\s*-|25|50|75|Join|Clear|Starts in|≋|…|×|[.]{3})$/i;
+            const nameLine = lines.find(l => !skipPatterns.test(l) && /[a-z]/i.test(l) && l.length > 1);
+            const partnerName = nameLine || null;
 
-              // Extract partner name - typically after the time and duration
-              const partnerMatch = cardText.match(/(?:25|50|75)[^\w]*([^J]+?)(?:Join|$)/i);
-              const partnerName = partnerMatch ? partnerMatch[1].trim() : null;
-
-              // Try to find session ID from any links
-              const sessionLink = card.locator('a[href*="/session/"]');
-              let sessionId: string | undefined;
-              try {
-                const href = await sessionLink.first().getAttribute('href', { timeout: 500 });
-                const idMatch = href?.match(/\/session\/([^/?]+)/);
-                if (idMatch) sessionId = idMatch[1];
-              } catch {
-                // No session link found
-              }
-
-              sessions.push({
-                id: sessionId || `unknown-${i}`,
-                startTime: startTimeStr,
-                endTime: endTimeStr,
-                duration,
-                status: 'matched',
-                partnerId: null,
-                partnerName: partnerName || null
-              });
+            // Build ISO datetimes by parsing the 12-hour time strings
+            const startDate = parseTime(timeMatch[1], start);
+            const endDate = parseTime(timeMatch[2], start);
+            // If end is before start, the session crosses midnight
+            if (endDate <= startDate) {
+              endDate.setDate(endDate.getDate() + 1);
             }
+
+            sessions.push({
+              id: `session-${i}`,
+              startTime: startDate.toISOString(),
+              endTime: endDate.toISOString(),
+              duration,
+              status: 'matched',
+              partnerId: null,
+              partnerName
+            });
           }
 
           return sessions;
