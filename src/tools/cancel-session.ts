@@ -10,6 +10,8 @@ import {
 } from '../schemas/session.js';
 import { SessionNotFoundError, AuthExpiredError } from '../utils/errors.js';
 
+const MAX_RETRIES = 1;
+
 export function registerCancelSessionTool(server: McpServer): void {
   server.tool(
     'cancel_session',
@@ -18,7 +20,6 @@ export function registerCancelSessionTool(server: McpServer): void {
       sessionId: CancelSessionInput.shape.sessionId
     },
     async ({ sessionId }): Promise<{ content: Array<{ type: 'text'; text: string }> }> => {
-      // Check if authenticated
       if (!hasAuthData()) {
         const output: CancelSessionOutput = {
           success: false,
@@ -30,99 +31,127 @@ export function registerCancelSessionTool(server: McpServer): void {
         };
       }
 
-      let context;
+      let lastError: Error | undefined;
 
-      try {
-        // Use persistent context which preserves Firebase auth tokens in IndexedDB
-        context = await launchPersistentContext({ headless: true });
-        const page = context.pages()[0] || await context.newPage();
+      for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+        let context;
+        try {
+          context = await launchPersistentContext({ headless: true });
+          const page = context.pages()[0] || await context.newPage();
 
-        const result = await withErrorScreenshot(page, 'cancel-session', async () => {
-          // Navigate directly to the session page
-          const sessionUrl = `https://app.focusmate.com/session/${sessionId}`;
-          await page.goto(sessionUrl, { waitUntil: 'networkidle' });
-
-          // Check if we got redirected to login (auth expired)
-          if (page.url().includes('/login')) {
-            throw new Error('Authentication expired. Please run focusmate_auth to log in again.');
-          }
-
-          // Check if session exists (404 or error page)
-          const notFoundIndicator = page.getByText(/not found/i)
-            .or(page.getByText(/doesn't exist/i))
-            .or(page.getByText(/404/i));
-
-          try {
-            await notFoundIndicator.waitFor({ timeout: 2000 });
-            throw new SessionNotFoundError(sessionId);
-          } catch (e) {
-            if (e instanceof SessionNotFoundError) {
-              throw e;
-            }
-            // Session exists, continue
-          }
-
-          // Find and click the cancel button - use the one in the Upcoming session panel
-          const cancelButton = page.getByLabel('Upcoming session').getByRole('button', { name: /cancel/i }).first()
-            .or(page.locator('button:has-text("Cancel session")').first());
-
-          await cancelButton.click();
-
-          // Handle confirmation dialog - click the "Cancel" button (not "Keep")
-          const confirmCancelButton = page.getByRole('button', { name: 'Cancel', exact: true })
-            .or(page.getByRole('button', { name: /confirm/i }))
-            .or(page.getByRole('button', { name: /yes.*cancel/i }));
-
-          try {
-            await confirmCancelButton.waitFor({ timeout: 3000 });
-            await confirmCancelButton.click();
-          } catch {
-            // No confirmation dialog, cancellation already processed
-          }
-
-          // Wait for success indicator or for the session to disappear from Upcoming
-          const successIndicator = page.getByText(/cancelled/i)
-            .or(page.getByText(/session has been cancelled/i))
-            .or(page.getByRole('alert'));
-
-          try {
-            await successIndicator.waitFor({ timeout: 3000 });
-          } catch {
-            // If no explicit success message, check that the confirmation dialog is gone
-            // and the session is no longer in the Upcoming panel
+          await withErrorScreenshot(page, `cancel-session-attempt-${attempt}`, async () => {
+            // Navigate to the dashboard where upcoming sessions are shown
+            await page.goto('https://app.focusmate.com/dashboard', { waitUntil: 'domcontentloaded' });
             await page.waitForTimeout(1000);
+
+            if (page.url().includes('/login')) {
+              throw new AuthExpiredError();
+            }
+
+            // Wait for the page to load
+            await page.waitForLoadState('networkidle');
+
+            // Find the session card and its cancel/clear button
+            // Strategy 1: Look for a session card that links to this session ID
+            const sessionLink = page.locator(`a[href*="${sessionId}"]`);
+            const hasLink = await sessionLink.count() > 0;
+
+            if (hasLink) {
+              // Find the cancel button near this session link
+              const sessionCard = sessionLink.locator('..').locator('..');
+              const cancelBtn = sessionCard.getByRole('button', { name: /cancel|clear|×/i }).first();
+
+              if (await cancelBtn.isVisible()) {
+                await cancelBtn.click();
+              } else {
+                // Try clicking a menu/options button first
+                const menuBtn = sessionCard.getByRole('button').first();
+                await menuBtn.click();
+                await page.waitForTimeout(300);
+
+                const cancelOption = page.getByRole('menuitem', { name: /cancel/i })
+                  .or(page.getByRole('button', { name: /cancel/i }))
+                  .first();
+                await cancelOption.click();
+              }
+            } else {
+              // Strategy 2: Navigate directly to the session page
+              await page.goto(`https://app.focusmate.com/session/${sessionId}`, {
+                waitUntil: 'networkidle'
+              });
+
+              if (page.url().includes('/login')) {
+                throw new AuthExpiredError();
+              }
+
+              // Check for 404
+              const notFound = await page.getByText(/not found/i)
+                .or(page.getByText(/doesn't exist/i))
+                .isVisible()
+                .catch(() => false);
+
+              if (notFound) {
+                throw new SessionNotFoundError(sessionId);
+              }
+
+              // Find cancel button on session page
+              const cancelButton = page.getByRole('button', { name: /cancel/i }).first();
+              await cancelButton.waitFor({ timeout: 5000 });
+              await cancelButton.click();
+            }
+
+            // Handle confirmation dialog
+            const confirmButton = page.getByRole('button', { name: /cancel/i }).last()
+              .or(page.getByRole('button', { name: /confirm/i }))
+              .or(page.getByRole('button', { name: /yes/i }));
+
+            try {
+              await confirmButton.waitFor({ timeout: 3000 });
+              await confirmButton.click();
+            } catch {
+              // No confirmation needed
+            }
+
+            // Wait for success indication
+            await page.waitForTimeout(1500);
+          });
+
+          const output: CancelSessionOutput = {
+            success: true,
+            message: `Session ${sessionId} has been cancelled.`
+          };
+          return {
+            content: [{ type: 'text', text: JSON.stringify(output, null, 2) }]
+          };
+
+        } catch (error) {
+          lastError = error instanceof Error ? error : new Error(String(error));
+
+          if (error instanceof SessionNotFoundError || error instanceof AuthExpiredError) {
+            break;
           }
 
-          return true;
-        });
-
-        const output: CancelSessionOutput = {
-          success: true,
-          message: `Session ${sessionId} has been cancelled.`
-        };
-
-        return {
-          content: [{ type: 'text', text: JSON.stringify(output, null, 2) }]
-        };
-
-      } catch (error) {
-        const output: CancelSessionOutput = {
-          success: false,
-          message: error instanceof Error ? error.message : 'Unknown error occurred',
-          errorCode: error instanceof SessionNotFoundError ? 'SESSION_NOT_FOUND'
-            : error instanceof AuthExpiredError ? 'AUTH_EXPIRED'
-            : 'AUTOMATION_FAILED'
-        };
-
-        return {
-          content: [{ type: 'text', text: JSON.stringify(output, null, 2) }]
-        };
-
-      } finally {
-        if (context) {
-          await context.close();
+          if (attempt < MAX_RETRIES) {
+            console.error(`Cancel attempt ${attempt + 1} failed, retrying: ${lastError.message}`);
+          }
+        } finally {
+          if (context) {
+            await context.close();
+          }
         }
       }
+
+      const output: CancelSessionOutput = {
+        success: false,
+        message: lastError?.message || 'Unknown error occurred',
+        errorCode: lastError instanceof SessionNotFoundError ? 'SESSION_NOT_FOUND'
+          : lastError instanceof AuthExpiredError ? 'AUTH_EXPIRED'
+          : 'AUTOMATION_FAILED'
+      };
+
+      return {
+        content: [{ type: 'text', text: JSON.stringify(output, null, 2) }]
+      };
     }
   );
 }

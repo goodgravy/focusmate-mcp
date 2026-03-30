@@ -1,4 +1,6 @@
 import type { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
+import { FocusmateClient } from '../api/focusmate-client.js';
+import { getApiKey } from '../api/config.js';
 import {
   launchPersistentContext,
   hasAuthData,
@@ -29,116 +31,122 @@ function parseTime(timeStr: string, baseDate: Date): Date {
   return date;
 }
 
+async function listViaApi(startDate: string, endDate: string): Promise<Session[]> {
+  const client = new FocusmateClient();
+  return client.getSessions(startDate, endDate);
+}
+
+async function listViaBrowser(start: Date, end: Date): Promise<Session[]> {
+  if (!hasAuthData()) {
+    throw new Error('Not authenticated. Please run focusmate_auth first.');
+  }
+
+  const context = await launchPersistentContext({ headless: true });
+  try {
+    const page = context.pages()[0] || await context.newPage();
+    await navigateToDashboard(page);
+
+    return await withErrorScreenshot(page, 'list-sessions', async () => {
+      await page.waitForTimeout(2000);
+
+      const sessionCards = page.getByLabel('Upcoming session');
+      const count = await sessionCards.count();
+      const sessions: Session[] = [];
+
+      for (let i = 0; i < count; i++) {
+        const card = sessionCards.nth(i);
+        const cardText = await card.innerText() || '';
+
+        const timeMatch = cardText.match(/(\d{1,2}:\d{2}[ap]m)\s*-\s*(\d{1,2}:\d{2}[ap]m)/i);
+        if (!timeMatch) continue;
+
+        const durationMatch = cardText.match(/\b(25|50|75)\b/);
+        const duration = durationMatch ? parseInt(durationMatch[1]) : 50;
+
+        const lines = cardText.split('\n').map(l => l.trim()).filter(Boolean);
+        const skipPatterns = /^(\d{1,2}:\d{2}[ap]m\s*-|25|50|75|Join|Clear|Starts in|≋|…|×|[.]{3})$/i;
+        const nameLine = lines.find(l => !skipPatterns.test(l) && /[a-z]/i.test(l) && l.length > 1);
+        const partnerName = nameLine || null;
+
+        const startDate = parseTime(timeMatch[1], start);
+        const endDate = parseTime(timeMatch[2], start);
+        if (endDate <= startDate) {
+          endDate.setDate(endDate.getDate() + 1);
+        }
+
+        sessions.push({
+          id: `session-${i}`,
+          startTime: startDate.toISOString(),
+          endTime: endDate.toISOString(),
+          duration,
+          status: 'matched',
+          partnerId: null,
+          partnerName
+        });
+      }
+
+      return sessions;
+    });
+  } finally {
+    await context.close();
+  }
+}
+
 export function registerListSessionsTool(server: McpServer): void {
   server.tool(
     'list_sessions',
-    'List upcoming Focusmate sessions from the dashboard.',
+    'List upcoming Focusmate sessions. Uses the API if an API key is configured, otherwise falls back to browser scraping.',
     {
       startDate: ListSessionsInput.shape.startDate,
       endDate: ListSessionsInput.shape.endDate
     },
     async ({ startDate, endDate }): Promise<{ content: Array<{ type: 'text'; text: string }> }> => {
-      // Check if authenticated
-      if (!hasAuthData()) {
-        const output: ListSessionsOutput = {
-          sessions: [],
-          totalCount: 0
-        };
-        return {
-          content: [{
-            type: 'text',
-            text: JSON.stringify({
-              ...output,
-              error: 'Not authenticated. Please run focusmate_auth first.',
-              errorCode: 'AUTH_REQUIRED'
-            }, null, 2)
-          }]
-        };
-      }
-
       const start = new Date(startDate);
       const end = endDate ? new Date(endDate) : new Date(start.getTime() + 7 * 24 * 60 * 60 * 1000);
 
-      let context;
-
       try {
-        context = await launchPersistentContext({ headless: true });
-        const page = context.pages()[0] || await context.newPage();
+        // Prefer API if key is configured
+        if (getApiKey()) {
+          const sessions = await listViaApi(start.toISOString(), end.toISOString());
+          const output: ListSessionsOutput = {
+            sessions,
+            totalCount: sessions.length
+          };
+          return {
+            content: [{ type: 'text', text: JSON.stringify(output, null, 2) }]
+          };
+        }
+      } catch (error) {
+        // API failed, fall through to browser
+        console.error('API listing failed, falling back to browser:', error);
+      }
 
-        await navigateToDashboard(page);
+      // Browser fallback
+      try {
+        if (!hasAuthData()) {
+          const output: ListSessionsOutput = { sessions: [], totalCount: 0 };
+          return {
+            content: [{
+              type: 'text',
+              text: JSON.stringify({
+                ...output,
+                error: 'Not authenticated. Please run focusmate_auth first.',
+                errorCode: 'AUTH_REQUIRED'
+              }, null, 2)
+            }]
+          };
+        }
 
-        const sessions = await withErrorScreenshot(page, 'list-sessions', async () => {
-          // Wait for the dashboard to load
-          await page.waitForTimeout(2000);
-
-          // Session cards in the Upcoming panel have aria-label="Upcoming session"
-          const sessionCards = page.getByLabel('Upcoming session');
-          const count = await sessionCards.count();
-
-          const sessions: Session[] = [];
-
-          for (let i = 0; i < count; i++) {
-            const card = sessionCards.nth(i);
-            const cardText = await card.innerText() || '';
-
-            // innerText gives newline-separated lines like:
-            //   "5:30pm - 6:20pm\n50\n≋\nTrung V.\nJoin\n..."
-            const timeMatch = cardText.match(/(\d{1,2}:\d{2}[ap]m)\s*-\s*(\d{1,2}:\d{2}[ap]m)/i);
-            if (!timeMatch) continue;
-
-            const durationMatch = cardText.match(/\b(25|50|75)\b/);
-            const duration = durationMatch ? parseInt(durationMatch[1]) : 50;
-
-            // Partner name: find lines that aren't times, durations, or button labels
-            const lines = cardText.split('\n').map(l => l.trim()).filter(Boolean);
-            const skipPatterns = /^(\d{1,2}:\d{2}[ap]m\s*-|25|50|75|Join|Clear|Starts in|≋|…|×|[.]{3})$/i;
-            const nameLine = lines.find(l => !skipPatterns.test(l) && /[a-z]/i.test(l) && l.length > 1);
-            const partnerName = nameLine || null;
-
-            // Build ISO datetimes by parsing the 12-hour time strings
-            const startDate = parseTime(timeMatch[1], start);
-            const endDate = parseTime(timeMatch[2], start);
-            // If end is before start, the session crosses midnight
-            if (endDate <= startDate) {
-              endDate.setDate(endDate.getDate() + 1);
-            }
-
-            sessions.push({
-              id: `session-${i}`,
-              startTime: startDate.toISOString(),
-              endTime: endDate.toISOString(),
-              duration,
-              status: 'matched',
-              partnerId: null,
-              partnerName
-            });
-          }
-
-          return sessions;
-        });
-
-        // Filter by date range if needed
-        const filteredSessions = sessions.filter(s => {
-          // Since we only have time strings, we can't fully filter by date
-          // Return all sessions for now
-          return true;
-        });
-
+        const sessions = await listViaBrowser(start, end);
         const output: ListSessionsOutput = {
-          sessions: filteredSessions,
-          totalCount: filteredSessions.length
+          sessions,
+          totalCount: sessions.length
         };
-
         return {
           content: [{ type: 'text', text: JSON.stringify(output, null, 2) }]
         };
-
       } catch (error) {
-        const output: ListSessionsOutput = {
-          sessions: [],
-          totalCount: 0
-        };
-
+        const output: ListSessionsOutput = { sessions: [], totalCount: 0 };
         return {
           content: [{
             type: 'text',
@@ -149,11 +157,6 @@ export function registerListSessionsTool(server: McpServer): void {
             }, null, 2)
           }]
         };
-
-      } finally {
-        if (context) {
-          await context.close();
-        }
       }
     }
   );

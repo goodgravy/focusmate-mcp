@@ -71,8 +71,16 @@ export async function isLoggedIn(page: Page): Promise<boolean> {
 async function checkAuthAndNavigate(page: Page, targetUrl: string): Promise<void> {
   await page.goto(targetUrl, { waitUntil: 'domcontentloaded' });
 
-  // Give the page time to redirect if auth is invalid
-  await page.waitForTimeout(1000);
+  // Wait for either the dashboard to load or a redirect to login
+  try {
+    await Promise.race([
+      page.waitForURL('**/dashboard**', { timeout: 15000 }),
+      page.waitForURL('**/login**', { timeout: 15000 }),
+      page.waitForURL('**/home**', { timeout: 15000 })
+    ]);
+  } catch {
+    // Timeout — check current URL
+  }
 
   const currentUrl = page.url();
 
@@ -80,6 +88,9 @@ async function checkAuthAndNavigate(page: Page, targetUrl: string): Promise<void
   if (currentUrl.includes('/login')) {
     throw new AuthExpiredError('Session expired. Please run focusmate_auth to log in again.');
   }
+
+  // Wait for the page to be interactive
+  await page.waitForLoadState('networkidle');
 }
 
 export async function navigateToDashboard(page: Page): Promise<void> {
